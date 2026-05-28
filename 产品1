@@ -163,3 +163,100 @@ Right 25% independent window:real-time finished product sandbox preview display 
 Bottom status bar with AI analysis log and compiling info.
 Clean professional layout,monitor front view.
  
+整套离线AI编译工程项目搭建完整步骤
+ 
+一、前期环境准备(离线可用)
+ 
+1.基础技术栈确定
+ 
+1.主体软件界面：Qt6 或 Electron，整套桌面程序
+2.离线AI内核：Ollama部署Qwen2-7B-Instruct量化版(本地离线运行)
+3.工程解析模块：自研AST解析，适配Python/TS/C++/Unity/UE
+4.自动构建模块：调用本地CMake、npm、pip、MSBuild
+5.沙盒可视化预览
+前端预览：内嵌Chromium
+桌面UI预览：解析界面代码虚拟渲染
+6.本地存储：SQLite，存储项目进度、AI分析记录
+ 
+2.硬件最低要求
+ 
+内存≥16G，固态硬盘，Windows10/11
+ 
+二、项目目录架构(直接套用)
+ 
+plaintext  
+LocalAIBuilder
+├─AI_Core                #本地离线AI调度模块
+│  ├─model_deploy        #ollama模型调用程序
+│  ├─project_analyze     #工程全局逻辑解析
+│  ├─task_split          #需求拆解、任务规划
+├─Project_Check          #文件路径自检、依赖校验
+│  ├─file_scan           #全盘扫描项目目录
+│  ├─error_repair        #路径错误自动修复
+│  └─struct_standardize  #规整项目文件夹结构
+├─Auto_Doc_Gen           #自动文档&进度整理
+│  ├─progress_track      #抓取文件改动更新进度
+│  └─md_export           #各类设计文档生成
+├─Build_Engine           #自动化项目构造编译
+│  ├─multi_build_tool    #对接各类构建工具
+│  └─code_scaffold       #自动生成初始工程代码
+├─Sandbox_Viewer         #核心可视化沙盒窗口
+│  ├─ui_render           #成品界面实时渲染
+│  └─code_sync           #修改双向同步
+├─UI_Main                #软件整体三栏界面
+│  ├─LeftPanel           #文件树+架构图谱
+│  ├─CenterPanel         #代码编辑器+任务文档
+│  └─RightSandbox        #预览窗口
+└─Local_Data             #SQLite数据库、缓存配置
+ 
+ 
+三、分步搭建流程
+ 
+阶段1：搭建主程序UI界面
+ 
+1.完成三栏布局固定框架
+左侧文件树、中部代码区、右侧沙盒预览，顶部工具栏，底部日志栏
+2.实现本地文件夹导入功能，读取文件树形展示
+ 
+阶段2：接入离线AI核心
+ 
+1.本机部署Ollama，后台静默运行，禁止联网
+2.编写接口实现软件内部调用本地大模型
+能力：解析项目结构、梳理架构、拆分开发任务
+ 
+阶段3：开发工程自动检测模块
+ 
+1.扫描导入项目，识别项目类型(前端/桌面/游戏/后端)
+2.检测路径错误、依赖缺失、配置异常
+3.AI给出修复方案并自动修改文件目录
+ 
+阶段4：自动化项目规划与文档模块
+ 
+1.用户输入项目需求，AI自动拆分开发阶段、模块划分
+2.实时监控文件修改，自动更新开发进度
+3.自动生成全套设计文档归档保存
+ 
+阶段5：项目整体实时分析功能
+ 
+文件每次保存触发AI全局解析项目逻辑
+标注模块调用关系、架构缺陷、冗余代码，实时更新分析报告
+ 
+阶段6：可视化沙盒窗口(重点)
+ 
+1.根据项目类型对应渲染成品预览界面
+2.代码改动即时刷新沙盒画面
+3.预览界面可简单交互，反向给出代码修改建议
+ 
+阶段7：整体整合打包
+ 
+1.全部模块互通联动，一处改动全局更新
+2.打包为Windows独立exe软件，完整离线运行
+ 
+四、最简开发启动顺序
+ 
+1.先完成主体UI界面
+2.接入本地AI模型调用
+3.文件扫描检测功能
+4.任务与文档自动化
+5.沙盒预览渲染收尾
+ 

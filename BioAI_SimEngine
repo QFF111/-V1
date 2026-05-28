@@ -283,3 +283,1307 @@ int main()
 3.扩展DNA氨基酸序列、器官性状映射、微观基因模拟。
 4.增加躯体物理碰撞、生态物种交互。
  
+BioAI_SimEngine 规范多文件C++工程(VS2022)
+ 
+依赖：GLFW3、GLAD、GLM，纯OpenGL固定管线简易渲染，实现基因演化+AI躯体控制+720°全景渲染+生态模拟
+ 
+一、工程目录结构
+ 
+plaintext  
+BioAI_SimEngine/
+├─Core/
+│  ├─GeneEngine.h
+│  ├─GeneEngine.cpp
+│  ├─AICore.h
+│  ├─AICore.cpp
+│  ├─BodyController.h
+│  ├─BodyController.cpp
+│  └─EcoSystem.h
+│  └─EcoSystem.cpp
+├─Render/
+│  ├─PanoramicCamera.h
+│  ├─PanoramicCamera.cpp
+│  ├─SceneRender.h
+│  └─SceneRender.cpp
+└─main.cpp
+ 
+ 
+二、逐个源码文件
+ 
+1.Core/GeneEngine.h
+ 
+cpp  
+#pragma once
+#include <vector>
+#include <string>
+#include <random>
+#include <glm/glm.hpp>
+
+enum DNABase { A, T, C, G };
+
+struct GeneSegment
+{
+    std::vector<DNABase> bases;
+    std::string trait;
+    float weight;
+};
+
+struct Genome
+{
+    std::vector<GeneSegment> geneList;
+    float evolveRate = 0.001f;
+    long long version = 1;
+};
+
+class GeneEngine
+{
+public:
+    Genome genome;
+    std::mt19937 rng;
+
+    GeneEngine();
+    void InitBaseGene();
+    void AISelfMutate();
+    float GetTraitWeight(const std::string& tag);
+};
+ 
+ 
+Core/GeneEngine.cpp
+ 
+cpp  
+#include "GeneEngine.h"
+#include <ctime>
+
+GeneEngine::GeneEngine()
+{
+    rng.seed((unsigned)time(nullptr));
+    InitBaseGene();
+}
+
+void GeneEngine::InitBaseGene()
+{
+    genome.geneList.push_back({{A, T, C, G}, "skeleton", 1.0f});
+    genome.geneList.push_back({{C, G, A, T}, "nerve", 1.0f});
+    genome.geneList.push_back({{T, A, G, C}, "motion", 1.0f});
+}
+
+void GeneEngine::AISelfMutate()
+{
+    std::uniform_real_distribution<float> dist(-genome.evolveRate, genome.evolveRate);
+    for (auto& seg : genome.geneList)
+    {
+        seg.weight += dist(rng);
+        seg.weight = glm::clamp(seg.weight, 0.2f, 2.5f);
+    }
+    genome.version++;
+}
+
+float GeneEngine::GetTraitWeight(const std::string& tag)
+{
+    for (auto& s : genome.geneList)
+        if (s.trait == tag) return s.weight;
+    return 1.0f;
+}
+ 
+ 
+2.Core/BodyController.h
+ 
+cpp  
+#pragma once
+#include <vector>
+#include <glm/glm.hpp>
+#include "GeneEngine.h"
+
+struct Joint
+{
+    float angle = 0.f;
+    glm::vec3 offset;
+};
+
+class BodyController
+{
+public:
+    std::vector<Joint> joints;
+    float bodyScale = 1.f;
+    float reactSpeed = 1.f;
+
+    BodyController();
+    void UpdateFromGene(GeneEngine& ge);
+    void UpdateAction(std::vector<float> actData, float dt);
+};
+ 
+ 
+Core/BodyController.cpp
+ 
+cpp  
+#include "BodyController.h"
+
+BodyController::BodyController()
+{
+    joints.resize(16);
+}
+
+void BodyController::UpdateFromGene(GeneEngine& ge)
+{
+    bodyScale = ge.GetTraitWeight("skeleton");
+    reactSpeed = ge.GetTraitWeight("nerve");
+}
+
+void BodyController::UpdateAction(std::vector<float> actData, float dt)
+{
+    for (int i = 0; i < joints.size() && i < actData.size(); i++)
+    {
+        joints[i].angle += actData[i] * reactSpeed * dt;
+    }
+}
+ 
+ 
+###3.Core/AICore.h
+ 
+cpp  
+#pragma once
+#include <vector>
+#include "GeneEngine.h"
+
+class AICore
+{
+public:
+    std::vector<float> Decide(float envVal, GeneEngine& ge);
+    void SelfEvolve(GeneEngine& ge);
+};
+ 
+ 
+Core/AICore.cpp
+ 
+cpp  
+#include "AICore.h"
+
+std::vector<float> AICore::Decide(float envVal, GeneEngine& ge)
+{
+    std::vector<float> res(16, 0.f);
+    float motionW = ge.GetTraitWeight("motion");
+    for (int i = 0; i < 16; i++)
+    {
+        res[i] = (envVal - 0.5f) * motionW * 0.4f;
+    }
+    return res;
+}
+
+void AICore::SelfEvolve(GeneEngine& ge)
+{
+    ge.AISelfMutate();
+}
+ 
+ 
+###4.Core/EcoSystem.h
+ 
+cpp  
+#pragma once
+#include "AICore.h"
+#include "GeneEngine.h"
+#include "BodyController.h"
+
+class EcoSystem
+{
+public:
+    float timeTick = 0.f;
+    float envFactor = 0.5f;
+    float lastEvolve = 0.f;
+
+    void Tick(float dt, AICore& ai, GeneEngine& ge, BodyController& body);
+    float GetEnv();
+};
+ 
+ 
+Core/EcoSystem.cpp
+ 
+cpp  
+#include "EcoSystem.h"
+#include <cmath>
+
+void EcoSystem::Tick(float dt, AICore& ai, GeneEngine& ge, BodyController& body)
+{
+    timeTick += dt;
+    envFactor = std::sin(timeTick * 0.2f) * 0.3f + 0.5f;
+
+    if (timeTick - lastEvolve > 25.f)
+    {
+        lastEvolve = timeTick;
+        ai.SelfEvolve(ge);
+        body.UpdateFromGene(ge);
+    }
+}
+
+float EcoSystem::GetEnv()
+{
+    return envFactor;
+}
+ 
+ 
+###5.Render/PanoramicCamera.h(720°三轴全景相机)
+ 
+cpp  
+#pragma once
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+class PanoramicCamera
+{
+public:
+    glm::vec3 camPos;
+    float yaw, pitch, roll;
+
+    PanoramicCamera();
+    void Update(float dt);
+    glm::mat4 GetViewMatrix();
+};
+ 
+ 
+Render/PanoramicCamera.cpp
+ 
+cpp  
+#include "PanoramicCamera.h"
+
+PanoramicCamera::PanoramicCamera()
+{
+    camPos = glm::vec3(0, 3, 10);
+    yaw = 0.f;
+    pitch = 0.f;
+    roll = 0.f;
+}
+
+void PanoramicCamera::Update(float dt)
+{
+    yaw += dt * 0.25f;
+    pitch += dt * 0.08f;
+    roll += dt * 0.03f;
+}
+
+glm::mat4 PanoramicCamera::GetViewMatrix()
+{
+    glm::mat4 view = glm::lookAt(camPos, glm::vec3(0, 2, 0), glm::vec3(0, 1, 0));
+    view = glm::rotate(view, glm::radians(yaw), glm::vec3(0, 1, 0));
+    view = glm::rotate(view, glm::radians(pitch), glm::vec3(1, 0, 0));
+    view = glm::rotate(view, glm::radians(roll), glm::vec3(0, 0, 1));
+    return view;
+}
+ 
+ 
+###6.Render/SceneRender.h
+ 
+cpp  
+#pragma once
+#include <glad/glad.h>
+#include <glm/glm.hpp>
+#include "PanoramicCamera.h"
+#include "../Core/BodyController.h"
+
+class SceneRender
+{
+public:
+    void DrawWorld(glm::mat4 proj, glm::mat4 view);
+    void DrawBody(BodyController& body, glm::mat4 proj, glm::mat4 view);
+};
+ 
+ 
+Render/SceneRender.cpp
+ 
+cpp  
+#include "SceneRender.h"
+#include <glm/gtc/type_ptr.hpp>
+#include <cmath>
+
+void SceneRender::DrawWorld(glm::mat4 proj, glm::mat4 view)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(glm::value_ptr(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(glm::value_ptr(view));
+
+    glColor3f(0.2f, 0.35f, 0.2f);
+    glBegin(GL_QUADS);
+    glVertex3f(-30, 0, -30);
+    glVertex3f(30, 0, -30);
+    glVertex3f(30, 0, 30);
+    glVertex3f(-30, 0, 30);
+    glEnd();
+
+    glColor3f(0.15f, 0.18f, 0.22f);
+    glBegin(GL_LINE_LOOP);
+    for (int i = 0; i <= 360; i += 15)
+    {
+        float rad = glm::radians((float)i);
+        glVertex3f(std::cos(rad) * 28, 12, std::sin(rad) * 28);
+    }
+    glEnd();
+}
+
+void SceneRender::DrawBody(BodyController& body, glm::mat4 proj, glm::mat4 view)
+{
+    glm::mat4 model = glm::mat4(1.f);
+    model = glm::scale(model, glm::vec3(body.bodyScale));
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(glm::value_ptr(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(glm::value_ptr(view * model));
+
+    glBegin(GL_QUADS);
+    glColor3f(0.3f, 0.6f, 0.9f);
+    glVertex3f(-0.4f, 0.f, 0.f);
+    glVertex3f(0.4f, 0.f, 0.f);
+    glVertex3f(0.4f, 2.f, 0.f);
+    glVertex3f(-0.4f, 2.f, 0.f);
+    glEnd();
+
+    for (int i = 0; i < 8; i++)
+    {
+        glPushMatrix();
+        glRotatef(body.joints[i].angle, 0, 0, 1);
+        glColor3f(0.9f, 0.4f, 0.4f);
+        glBegin(GL_QUADS);
+        glVertex3f(0, 2.f, 0);
+        glVertex3f(0.2f, 2.f, 0);
+        glVertex3f(0.2f, 3.2f, 0);
+        glVertex3f(0, 3.2f, 0);
+        glEnd();
+        glPopMatrix();
+    }
+}
+ 
+ 
+###7.main.cpp程序入口
+ 
+cpp  
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include "Core/GeneEngine.h"
+#include "Core/AICore.h"
+#include "Core/BodyController.h"
+#include "Core/EcoSystem.h"
+#include "Render/PanoramicCamera.h"
+#include "Render/SceneRender.h"
+
+int main()
+{
+    if (!glfwInit()) return -1;
+    GLFWwindow* win = glfwCreateWindow(1280, 720, "BioAI 720 Eco Sim", nullptr, nullptr);
+    glfwMakeContextCurrent(win);
+    gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+
+    GeneEngine gene;
+    BodyController body;
+    AICore ai;
+    EcoSystem eco;
+    PanoramicCamera cam;
+    SceneRender render;
+
+    float lastTime = (float)glfwGetTime();
+
+    while (!glfwWindowShouldClose(win))
+    {
+        float now = (float)glfwGetTime();
+        float dt = now - lastTime;
+        lastTime = now;
+
+        glClearColor(0.05f, 0.07f, 0.11f, 1.f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+
+        eco.Tick(dt, ai, gene, body);
+        auto act = ai.Decide(eco.GetEnv(), gene);
+        body.UpdateAction(act, dt);
+        cam.Update(dt);
+
+        glm::mat4 proj = glm::perspective(glm::radians(70.f), 1280.f / 720.f, 0.1f, 120.f);
+        glm::mat4 view = cam.GetViewMatrix();
+
+        render.DrawWorld(proj, view);
+        render.DrawBody(body, proj, view);
+
+        glfwSwapBuffers(win);
+        glfwPollEvents();
+    }
+    glfwTerminate();
+    return 0;
+}
+ 
+ 
+编译部署步骤
+ 
+1.VS2022创建空C++项目，建立上述文件夹，粘贴全部文件。
+2.附加依赖库：GLFW3.lib、glad.c、glm头文件。
+3.X64 Release编译运行。
+ 
+完整闭环运行效果
+ 
+1.基因模块25秒自主变异一次，躯体尺寸、反应速度同步变化。
+2.AI依据生态环境自主控制全身关节运动。
+3.相机三轴不间断旋转，完整720°全方位观察数字人生态空间。
+4.生态环境持续动态变化，与AI躯体、基因互相作用迭代。
+ 
+BioAI_SimEngine 完整迭代升级路线
+ 
+整体分4阶段稳步升级，全程基于现有C++工程拓展，不推翻原有架构
+ 
+阶段一：骨架网格重构(完善仿生躯体 1~3天)
+ 
+1.现有问题
+ 
+当前为简易方块肢体，无真实骨骼绑定。
+ 
+升级内容
+ 
+1.引入Assimp模型加载库
+-支持fbx/obj人形网格模型导入
+2.骨骼绑定系统
+ 
+plaintext  
+Joint结构体升级
+struct Joint
+{
+    int parentIndex;
+    glm::mat4 bindMatrix;
+    glm::vec3 localPos;
+    glm::quat localRot;
+};
+ 
+ 
+3.躯体更新逻辑不变
+依旧由GeneEngine基因数据驱动骨骼缩放、运动灵敏度。
+4.渲染替换
+删除方块绘制，采用网格顶点着色器绘制标准人形数字人。
+ 
+接入位置
+ 
+1.拓展BodyController骨骼层级管理
+2.SceneRender新增Mesh渲染接口
+ 
+阶段二：渲染管线升级 PBR写实渲染(3~7天)
+ 
+1.更换渲染架构
+ 
+舍弃固定管线OpenGL，采用OpenGL3.3 Core可编程着色器
+1.新增Shader文件夹
+ 
+plaintext  
+Render/Shader/
+    vert.h
+    frag.h
+    pbr.glsl
+ 
+ 
+2.实现基础PBR
+-金属粗糙度渲染
+-环境天光、实时简单光照
+-环境空间雾效，完善仿生世界氛围感
+ 
+2.720°全景相机强化
+ 
+1.保留三轴(yaw/pitch/roll)旋转
+2.增加鼠标自由拖拽720度观察
+3.相机碰撞，防止穿透场景
+ 
+3.场景生态可视化升级
+ 
+1.地面草地、简易植被静态模型
+2.昼夜光照周期联动EcoSystem环境参数
+生态环境数据直观体现在画面光影上。
+ 
+阶段三：AI内核替换，接入本地离线模型(7~15天)
+ 
+原有AICore仅数学模拟，替换为真实本地AI闭环进化。
+ 
+1.架构接入方式
+ 
+1.工程内开启进程调用Ollama量化本地模型(Qwen2-7B)
+2.AICore职责拆分
+①环境观测模块：收集EcoSystem世界数据
+②自我剖析模块：分析自身控制策略短板
+③自主代码生成模块：AI可输出插件C++代码
+④插件热加载模块
+ 
+2.AI自我进化完整流程
+ 
+1.AI运行躯体在生态世界活动，记录行为表现数据
+2.判定自身动作策略缺陷
+3.受控联网检索开源运动控制算法参考
+4.在工程隔离目录生成新版控制插件代码
+5.本地后台编译插件，测试择优替换旧版本
+6.基因模块同步跟随AI策略完成性状变异
+ 
+3.管控约束(必要)
+ 
+1.AI无法删除自身底层安全代码
+2.网络检索仅限开源技术站点，全域浏览禁用
+3.全部AI自研代码留存日志
+ 
+工程新增文件夹
+ 
+plaintext  
+AI_Plugin/
+    PluginLoader.h //动态加载AI自研插件
+    CodeSelfCompile.cpp //AI代码本地编译接口
+    ModelLocalCall.cpp //本地大模型调用
+ 
+ 
+阶段四：基因工程深度拓展+完整仿生生态圈(15~30天)
+ 
+1.基因系统深化
+ 
+1.DNA序列拓展为完整碱基链+氨基酸映射
+-骨骼密度
+-肌肉爆发力
+-神经反应延迟
+-器官能耗参数
+2.基因显性/隐性性状模拟
+3.躯体形态会随着多轮迭代肉眼产生外形变化
+ 
+2.真实仿生生态闭环
+ 
+1.物质循环：能量消耗、休息、环境互动
+2.环境压力促使AI持续基因迭代
+3.多个AI生物个体共存，形成种群演化
+ 
+3.躯体物理系统
+ 
+1.引入Bullet物理引擎
+全身关节动力学，碰撞、重力、肢体受力
+2.AI需要自主维持躯体平衡
+ 
+4.数字人生活空间拓展
+ 
+1.多层立体场景，地形起伏
+2.季节、气象、昼夜完整时序模拟
+3.生态数据实时可视化面板嵌入软件界面
+ 
+最终成品整体能力总结
+ 
+1.C++底层主控
+2.PBR写实数字人，全身骨骼物理仿生躯体
+3.720度可自由环视完整三维生态世界
+4.本地离线AI自主思考、自主编写插件优化自身行为策略
+5.基因工程驱动躯体外形、性能持续进化
+6.生态环境与AI生物双向作用，无限迭代演化
+ 
+最简优先开发顺序
+ 
+1.先完成Assimp骨骼人形模型替换当前方块
+2.升级PBR可编程渲染
+3.接入本地离线大模型替换简易AICore
+4.深化基因与生态系统
+ 
+BioAI_SimEngine 完整极简整合源码(C++ OpenGL)
+编译环境：VS2022，GLAD+GLFW+GLM，单文件整合可直接编译运行
+整体实现：基因演算、仿生躯体控制、720° 全景三维渲染、生态模拟、AI 自主进化联动躯体。
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <vector>
+#include <string>
+#include <iostream>
+#include <random>
+#include <ctime>
+
+//====================1.基因工程底层结构====================
+enum DNABase { A, T, C, G };
+struct GeneSegment
+{
+    std::vector<DNABase> bases;
+    std::string trait;
+    float weight;
+};
+struct Genome
+{
+    std::vector<GeneSegment> geneList;
+    float evolveRate = 0.001f;
+    long long version = 1;
+};
+
+class GeneEngine
+{
+public:
+    Genome genome;
+    std::mt19937 rng;
+
+    GeneEngine() { rng.seed((unsigned)time(nullptr)); InitBaseGene(); }
+
+    void InitBaseGene()
+    {
+        genome.geneList.push_back({{A, T, C, G}, "skeleton", 1.0f});
+        genome.geneList.push_back({{C, G, A, T}, "nerve", 1.0f});
+        genome.geneList.push_back({{T, A, G, C}, "motion", 1.0f});
+    }
+
+    //AI自主基因变异进化
+    void AISelfMutate()
+    {
+        std::uniform_real_distribution<float> dist(-genome.evolveRate, genome.evolveRate);
+        for (auto& seg : genome.geneList)
+        {
+            seg.weight += dist(rng);
+            seg.weight = glm::clamp(seg.weight, 0.2f, 2.5f);
+        }
+        genome.version++;
+    }
+
+    float GetTraitWeight(const std::string& tag)
+    {
+        for (auto& s : genome.geneList)
+            if (s.trait == tag) return s.weight;
+        return 1.0f;
+    }
+};
+
+//====================2.仿生躯体控制器====================
+struct Joint
+{
+    float angle = 0.f;
+    glm::vec3 offset;
+};
+
+class BodyController
+{
+public:
+    std::vector<Joint> joints;
+    float bodyScale = 1.f;
+    float reactSpeed = 1.f;
+
+    BodyController()
+    {
+        joints.resize(16);
+    }
+
+    //基因驱动躯体参数更新
+    void UpdateFromGene(GeneEngine& ge)
+    {
+        bodyScale = ge.GetTraitWeight("skeleton");
+        reactSpeed = ge.GetTraitWeight("nerve");
+    }
+
+    //AI驱动关节动作
+    void UpdateAction(std::vector<float> actData, float dt)
+    {
+        for (int i = 0; i < joints.size() && i < actData.size(); i++)
+        {
+            joints[i].angle += actData[i] * reactSpeed * dt;
+        }
+    }
+};
+
+//====================3.AI自主决策核心====================
+class AICore
+{
+public:
+    std::vector<float> Decide(float envVal, GeneEngine& ge)
+    {
+        std::vector<float> res(16, 0.f);
+        float motionW = ge.GetTraitWeight("motion");
+        for (int i = 0; i < 16; i++)
+        {
+            res[i] = (envVal - 0.5f) * motionW * 0.4f;
+        }
+        return res;
+    }
+
+    void SelfEvolve(GeneEngine& ge)
+    {
+        ge.AISelfMutate();
+    }
+};
+
+//====================4.仿生生态模拟系统====================
+class EcoSystem
+{
+public:
+    float timeTick = 0.f;
+    float envFactor = 0.5f;
+    float lastEvolve = 0.f;
+
+    void Tick(float dt, AICore& ai, GeneEngine& ge, BodyController& body)
+    {
+        timeTick += dt;
+        envFactor = std::sin(timeTick * 0.2f) * 0.3f + 0.5f;
+
+        //定时AI进化
+        if (timeTick - lastEvolve > 25.f)
+        {
+            lastEvolve = timeTick;
+            ai.SelfEvolve(ge);
+            body.UpdateFromGene(ge);
+        }
+    }
+    float GetEnv() { return envFactor; }
+};
+
+//====================5.720°全景三维渲染====================
+glm::vec3 camPos(0, 3, 10);
+float yaw = 0.f, pitch = 0.f, roll = 0.f;
+
+void UpdateCamera(float dt)
+{
+    yaw += dt * 0.25f;
+    pitch += dt * 0.08f;
+    roll += dt * 0.03f;
+}
+
+void DrawBody(BodyController& body, glm::mat4 proj, glm::mat4 view)
+{
+    glm::mat4 model = glm::mat4(1.f);
+    model = glm::scale(model, glm::vec3(body.bodyScale));
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(glm::value_ptr(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(glm::value_ptr(view * model));
+
+    //躯干
+    glBegin(GL_QUADS);
+    glColor3f(0.3f, 0.6f, 0.9f);
+    glVertex3f(-0.4f, 0.f, 0.f);
+    glVertex3f(0.4f, 0.f, 0.f);
+    glVertex3f(0.4f, 2.f, 0.f);
+    glVertex3f(-0.4f, 2.f, 0.f);
+    glEnd();
+
+    //关节肢体简易渲染
+    for (int i = 0; i < 8; i++)
+    {
+        glPushMatrix();
+        glRotatef(body.joints[i].angle, 0, 0, 1);
+        glColor3f(0.9f, 0.4f, 0.4f);
+        glBegin(GL_QUADS);
+        glVertex3f(0, 2.f, 0);
+        glVertex3f(0.2f, 2.f, 0);
+        glVertex3f(0.2f, 3.2f, 0);
+        glVertex3f(0, 3.2f, 0);
+        glEnd();
+        glPopMatrix();
+    }
+}
+
+void DrawWorld(glm::mat4 proj, glm::mat4 view)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(glm::value_ptr(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(glm::value_ptr(view));
+
+    //地面
+    glColor3f(0.2f, 0.35f, 0.2f);
+    glBegin(GL_QUADS);
+    glVertex3f(-30, 0, -30);
+    glVertex3f(30, 0, -30);
+    glVertex3f(30, 0, 30);
+    glVertex3f(-30, 0, 30);
+    glEnd();
+
+    //全景环境围墙
+    glColor3f(0.15f, 0.18f, 0.22f);
+    glBegin(GL_LINE_LOOP);
+    for (int i = 0; i <= 360; i += 15)
+    {
+        float rad = glm::radians((float)i);
+        glVertex3f(std::cos(rad) * 28, 12, std::sin(rad) * 28);
+    }
+    glEnd();
+}
+
+//====================程序入口主循环====================
+int main()
+{
+    if (!glfwInit()) return -1;
+    GLFWwindow* win = glfwCreateWindow(1280,720,"BioAI 720°Eco Sim",nullptr,nullptr);
+    glfwMakeContextCurrent(win);
+    gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+
+    GeneEngine gene;
+    BodyController body;
+    AICore ai;
+    EcoSystem eco;
+
+    float lastTime = (float)glfwGetTime();
+
+    while (!glfwWindowShouldClose(win))
+    {
+        float now = (float)glfwGetTime();
+        float dt = now - lastTime;
+        lastTime = now;
+
+        glClearColor(0.05f,0.07f,0.11f,1.f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+
+        //生态迭代
+        eco.Tick(dt, ai, gene, body);
+        //AI决策驱动躯体
+        auto act = ai.Decide(eco.GetEnv(), gene);
+        body.UpdateAction(act, dt);
+
+        //720度相机更新
+        UpdateCamera(dt);
+        glm::mat4 proj = glm::perspective(glm::radians(70.f),1280.f/720.f,0.1f,120.f);
+        glm::mat4 view = glm::lookAt(camPos,glm::vec3(0,2,0),glm::vec3(0,1,0));
+        view = glm::rotate(view,glm::radians(yaw),glm::vec3(0,1,0));
+        view = glm::rotate(view,glm::radians(pitch),glm::vec3(1,0,0));
+        view = glm::rotate(view,glm::radians(roll),glm::vec3(0,0,1));
+
+        DrawWorld(proj,view);
+        DrawBody(body,proj,view);
+
+        glfwSwapBuffers(win);
+        glfwPollEvents();
+    }
+    glfwTerminate();
+    return 0;
+}
+运行说明
+1. 功能完整闭环
+1. 基因模块持续缓慢自主变异进化，版本号迭代。
+2. 基因参数实时映射仿生躯体尺寸、神经反应速度。
+[3.AI](3.AI) 读取生态环境数据自主控制躯体关节运动。
+4. 相机实现三轴循环旋转，达成 720° 全方位立体观察。
+5. 内置完整生态时序循环，环境与 AI 躯体双向影响。
+2. 拓展升级方向
+1. 可替换现代着色器 PBR 渲染，精细数字人网格骨骼。
+2. 对接本地离线 AI 模型，替换简易 AICore，实现真实自我编写插件迭代。
+3. 扩展 DNA 氨基酸序列、器官性状映射、微观基因模拟。
+4. 增加躯体物理碰撞、生态物种交互。
+
+BioAI_SimEngine 仿生AI基因进化仿真引擎（规范多文件工程完整版）
+一、项目概述
+项目名称：BioAI_SimEngine 生物AI自主进化仿真引擎
+编译环境：VS2022、GLAD、GLFW3、GLM（纯C++/OpenGL 离线运行，无云端依赖）
+核心能力：实现基因工程演算、仿生数字躯体实时控制、720°三轴全景三维渲染、真实生态环境模拟、AI自主决策与基因闭环进化，构建可无限迭代的虚拟生物生命仿真系统。
+核心特性闭环：环境时序变化 → AI感知决策 → 躯体动态运动 → 基因自主变异进化 → 躯体性状同步更新 → 反向适配生态环境，形成完整生命演化闭环。
+二、标准工程目录结构
+整套工程完全模块化拆分，解耦核心逻辑、渲染模块与生态系统，支持后续无缝迭代升级：
+BioAI_SimEngine/
+├─ Core/                    // 核心生物AI逻辑层
+│  ├─ GeneEngine.h/.cpp    // 基因工程演算、自主变异、性状映射
+│  ├─ BodyController.h/.cpp// 仿生躯体、关节运动控制系统
+│  ├─ AICore.h/.cpp        // AI自主感知、决策、进化核心
+│  └─ EcoSystem.h/.cpp     // 仿生真实世界生态模拟系统
+├─ Render/                  // 三维渲染全景模块
+│  ├─ PanoramicCamera.h/.cpp // 720°三轴全景相机系统
+│  └─ SceneRender.h/.cpp   // 场景、数字人躯体渲染绘制
+└─ main.cpp                 // 程序入口、主循环、模块整合调度
+三、分模块完整源码
+3.1 基因工程模块 Core/GeneEngine.h
+#pragma once
+#include <vector>
+#include <string>
+#include <random>
+#include <glm/glm.hpp>
+
+// DNA四种碱基定义
+enum DNABase { A, T, C, G };
+
+// 单段基因片段：碱基序列+生物性状+表达权重
+struct GeneSegment
+{
+    std::vector<DNABase> bases;
+    std::string trait;     // 绑定性状：骨骼/神经/运动
+    float weight;          // 性状表达权重（控制躯体参数）
+};
+
+// 完整生物基因组结构体
+struct Genome
+{
+    std::vector<GeneSegment> geneList;
+    float evolveRate = 0.001f;  // 自主进化速率
+    long long version = 1;      // 基因迭代版本号
+};
+
+// 基因演算引擎：初始化、自主变异、性状参数读取
+class GeneEngine
+{
+public:
+    Genome genome;
+    std::mt19937 rng;
+
+    GeneEngine();
+    void InitBaseGene();                // 初始化基础基因组
+    void AISelfMutate();                // AI自主基因变异进化
+    float GetTraitWeight(const std::string& tag); // 获取指定性状权重
+};
+3.2 基因工程模块 Core/GeneEngine.cpp
+#include "GeneEngine.h"
+#include <ctime>
+
+GeneEngine::GeneEngine()
+{
+    rng.seed((unsigned)time(nullptr));
+    InitBaseGene();
+}
+
+// 初始化基础生物基因组（三大核心性状）
+void GeneEngine::InitBaseGene()
+{
+    genome.geneList.push_back({{A, T, C, G}, "skeleton", 1.0f});
+    genome.geneList.push_back({{C, G, A, T}, "nerve", 1.0f});
+    genome.geneList.push_back({{T, A, G, C}, "motion", 1.0f});
+}
+
+// AI自主基因随机变异，限制性状参数合理区间
+void GeneEngine::AISelfMutate()
+{
+    std::uniform_real_distribution<float> dist(-genome.evolveRate, genome.evolveRate);
+    for (auto& seg : genome.geneList)
+    {
+        seg.weight += dist(rng);
+        seg.weight = glm::clamp(seg.weight, 0.2f, 2.5f);
+    }
+    genome.version++;
+}
+
+// 根据性状标签读取基因表达权重
+float GeneEngine::GetTraitWeight(const std::string& tag)
+{
+    for (auto& s : genome.geneList)
+        if (s.trait == tag) return s.weight;
+    return 1.0f;
+}
+3.3 仿生躯体模块 Core/BodyController.h
+#pragma once
+#include <vector>
+#include <glm/glm.hpp>
+#include "GeneEngine.h"
+
+// 躯体关节结构体：角度+偏移位置
+struct Joint
+{
+    float angle = 0.f;
+    glm::vec3 offset;
+};
+
+// 仿生躯体控制器：基因驱动形态、AI驱动关节运动
+class BodyController
+{
+public:
+    std::vector<Joint> joints;  // 全身关节数组
+    float bodyScale = 1.f;      // 躯体整体缩放（骨骼基因控制）
+    float reactSpeed = 1.f;     // 神经反应速度（神经基因控制）
+
+    BodyController();
+    void UpdateFromGene(GeneEngine& ge);       // 基因更新躯体参数
+    void UpdateAction(std::vector<float> actData, float dt); // AI驱动躯体动作
+};
+3.4 仿生躯体模块 Core/BodyController.cpp
+#include "BodyController.h"
+
+BodyController::BodyController()
+{
+    joints.resize(16); // 初始化16组仿生关节
+}
+
+// 读取基因组数据，同步更新躯体物理参数
+void BodyController::UpdateFromGene(GeneEngine& ge)
+{
+    bodyScale = ge.GetTraitWeight("skeleton");
+    reactSpeed = ge.GetTraitWeight("nerve");
+}
+
+// 接收AI决策数据，驱动全身关节动态运动
+void BodyController::UpdateAction(std::vector<float> actData, float dt)
+{
+    for (int i = 0; i < joints.size() && i < actData.size(); i++)
+    {
+        joints[i].angle += actData[i] * reactSpeed * dt;
+    }
+}
+3.5 AI决策核心模块 Core/AICore.h
+#pragma once
+#include <vector>
+#include "GeneEngine.h"
+
+// AI自主决策核心：环境感知、动作输出、触发自我进化
+class AICore
+{
+public:
+    std::vector<float> Decide(float envVal, GeneEngine& ge); // 环境感知决策
+    void SelfEvolve(GeneEngine& ge);                         // 触发基因自我进化
+};
+3.6 AI决策核心模块 Core/AICore.cpp
+#include "AICore.h"
+
+// 根据环境参数+运动基因权重，输出全身关节动作数据
+std::vector<float> AICore::Decide(float envVal, GeneEngine& ge)
+{
+    std::vector<float> res(16, 0.f);
+    float motionW = ge.GetTraitWeight("motion");
+    for (int i = 0; i < 16; i++)
+    {
+        res[i] = (envVal - 0.5f) * motionW * 0.4f;
+    }
+    return res;
+}
+
+// 调用基因引擎，执行自主变异进化
+void AICore::SelfEvolve(GeneEngine& ge)
+{
+    ge.AISelfMutate();
+}
+3.7 生态模拟模块 Core/EcoSystem.h
+#pragma once
+#include "AICore.h"
+#include "GeneEngine.h"
+#include "BodyController.h"
+
+// 真实仿生生态系统：时序迭代、环境动态变化、触发AI进化
+class EcoSystem
+{
+public:
+    float timeTick = 0.f;       // 全局生态时序
+    float envFactor = 0.5f;     // 环境状态系数（影响AI行为）
+    float lastEvolve = 0.f;     // 上次进化时间戳
+
+    void Tick(float dt, AICore& ai, GeneEngine& ge, BodyController& body); // 生态迭代帧更新
+    float GetEnv(); // 获取当前环境参数
+};
+3.8 生态模拟模块 Core/EcoSystem.cpp
+#include "EcoSystem.h"
+#include <cmath>
+
+// 每帧更新生态环境，定时触发AI基因进化与躯体更新
+void EcoSystem::Tick(float dt, AICore& ai, GeneEngine& ge, BodyController& body)
+{
+    timeTick += dt;
+    // 正弦模拟自然环境周期性变化（昼夜/气候波动）
+    envFactor = std::sin(timeTick * 0.2f) * 0.3f + 0.5f;
+
+    // 每25秒触发一次AI自主进化，同步更新躯体性状
+    if (timeTick - lastEvolve > 25.f)
+    {
+        lastEvolve = timeTick;
+        ai.SelfEvolve(ge);
+        body.UpdateFromGene(ge);
+    }
+}
+
+// 对外提供当前环境状态数据
+float EcoSystem::GetEnv()
+{
+    return envFactor;
+}
+3.9 720°全景相机模块 Render/PanoramicCamera.h
+#pragma once
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+// 三轴720°全景相机：偏航/俯仰/翻滚 全角度无死角观察
+class PanoramicCamera
+{
+public:
+    glm::vec3 camPos;
+    float yaw, pitch, roll;
+
+    PanoramicCamera();
+    void Update(float dt);                  // 每帧更新相机角度
+    glm::mat4 GetViewMatrix();              // 获取视图矩阵
+};
+3.10 720°全景相机模块 Render/PanoramicCamera.cpp
+#include "PanoramicCamera.h"
+
+PanoramicCamera::PanoramicCamera()
+{
+    camPos = glm::vec3(0, 3, 10);
+    yaw = 0.f;
+    pitch = 0.f;
+    roll = 0.f;
+}
+
+// 三轴持续旋转，实现720°全域动态观察
+void PanoramicCamera::Update(float dt)
+{
+    yaw += dt * 0.25f;
+    pitch += dt * 0.08f;
+    roll += dt * 0.03f;
+}
+
+// 生成带三轴旋转的最终视图矩阵
+glm::mat4 PanoramicCamera::GetViewMatrix()
+{
+    glm::mat4 view = glm::lookAt(camPos, glm::vec3(0, 2, 0), glm::vec3(0, 1, 0));
+    view = glm::rotate(view, glm::radians(yaw), glm::vec3(0, 1, 0));
+    view = glm::rotate(view, glm::radians(pitch), glm::vec3(1, 0, 0));
+    view = glm::rotate(view, glm::radians(roll), glm::vec3(0, 0, 1));
+    return view;
+}
+3.11 场景渲染模块 Render/SceneRender.h
+#pragma once
+#include <glad/glad.h>
+#include <glm/glm.hpp>
+#include "PanoramicCamera.h"
+#include "../Core/BodyController.h"
+
+// 全局渲染器：生态场景绘制+仿生数字人躯体绘制
+class SceneRender
+{
+public:
+    void DrawWorld(glm::mat4 proj, glm::mat4 view);    // 绘制生态世界场景
+    void DrawBody(BodyController& body, glm::mat4 proj, glm::mat4 view); // 绘制仿生躯体
+};
+3.12 场景渲染模块 Render/SceneRender.cpp
+#include "SceneRender.h"
+#include <glm/gtc/type_ptr.hpp>
+#include <cmath>
+
+// 绘制地面、全景环形生态边界
+void SceneRender::DrawWorld(glm::mat4 proj, glm::mat4 view)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(glm::value_ptr(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(glm::value_ptr(view));
+
+    // 草地地面
+    glColor3f(0.2f, 0.35f, 0.2f);
+    glBegin(GL_QUADS);
+    glVertex3f(-30, 0, -30);
+    glVertex3f(30, 0, -30);
+    glVertex3f(30, 0, 30);
+    glVertex3f(-30, 0, 30);
+    glEnd();
+
+    // 360°全景环境围墙边界
+    glColor3f(0.15f, 0.18f, 0.22f);
+    glBegin(GL_LINE_LOOP);
+    for (int i = 0; i <= 360; i += 15)
+    {
+        float rad = glm::radians((float)i);
+        glVertex3f(std::cos(rad) * 28, 12, std::sin(rad) * 28);
+    }
+    glEnd();
+}
+
+// 根据基因缩放参数、关节角度，动态绘制仿生躯体
+void SceneRender::DrawBody(BodyController& body, glm::mat4 proj, glm::mat4 view)
+{
+    glm::mat4 model = glm::mat4(1.f);
+    model = glm::scale(model, glm::vec3(body.bodyScale));
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(glm::value_ptr(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(glm::value_ptr(view * model));
+
+    // 躯干主体
+    glBegin(GL_QUADS);
+    glColor3f(0.3f, 0.6f, 0.9f);
+    glVertex3f(-0.4f, 0.f, 0.f);
+    glVertex3f(0.4f, 0.f, 0.f);
+    glVertex3f(0.4f, 2.f, 0.f);
+    glVertex3f(-0.4f, 2.f, 0.f);
+    glEnd();
+
+    // 四肢关节动态渲染
+    for (int i = 0; i < 8; i++)
+    {
+        glPushMatrix();
+        glRotatef(body.joints[i].angle, 0, 0, 1);
+        glColor3f(0.9f, 0.4f, 0.4f);
+        glBegin(GL_QUADS);
+        glVertex3f(0, 2.f, 0);
+        glVertex3f(0.2f, 2.f, 0);
+        glVertex3f(0.2f, 3.2f, 0);
+        glVertex3f(0, 3.2f, 0);
+        glEnd();
+        glPopMatrix();
+    }
+}
+3.13 程序入口 main.cpp
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include "Core/GeneEngine.h"
+#include "Core/AICore.h"
+#include "Core/BodyController.h"
+#include "Core/EcoSystem.h"
+#include "Render/PanoramicCamera.h"
+#include "Render/SceneRender.h"
+
+int main()
+{
+    // 初始化GLFW窗口
+    if (!glfwInit()) return -1;
+    GLFWwindow* win = glfwCreateWindow(1280, 720, "BioAI 720° Eco Genetic Sim", nullptr, nullptr);
+    glfwMakeContextCurrent(win);
+    gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+
+    // 实例化所有核心模块
+    GeneEngine gene;
+    BodyController body;
+    AICore ai;
+    EcoSystem eco;
+    PanoramicCamera cam;
+    SceneRender render;
+
+    float lastTime = (float)glfwGetTime();
+
+    // 主循环：帧更新+渲染闭环
+    while (!glfwWindowShouldClose(win))
+    {
+        // 计算帧间隔时间
+        float now = (float)glfwGetTime();
+        float dt = now - lastTime;
+        lastTime = now;
+
+        // 画布清空与深度测试开启
+        glClearColor(0.05f, 0.07f, 0.11f, 1.f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+
+        // 1.生态环境迭代更新
+        eco.Tick(dt, ai, gene, body);
+        // 2.AI感知环境，输出躯体动作指令
+        auto act = ai.Decide(eco.GetEnv(), gene);
+        // 3.躯体执行动态动作
+        body.UpdateAction(act, dt);
+        // 4.全景相机角度更新
+        cam.Update(dt);
+
+        // 投影矩阵+视图矩阵计算
+        glm::mat4 proj = glm::perspective(glm::radians(70.f), 1280.f / 720.f, 0.1f, 120.f);
+        glm::mat4 view = cam.GetViewMatrix();
+
+        // 渲染场景与仿生躯体
+        render.DrawWorld(proj, view);
+        render.DrawBody(body, proj, view);
+
+        // 缓冲区刷新+事件监听
+        glfwSwapBuffers(win);
+        glfwPollEvents();
+    }
+
+    glfwTerminate();
+    return 0;
+}
+四、编译部署说明
+4.1 环境依赖
+- 编译器：Visual Studio 2022
+- 图形依赖：GLAD、GLFW3、GLM（纯离线静态库，无联网依赖）
+- 编译架构：X64 Release 最优
+4.2 部署步骤
+1. VS2022创建空C++项目，按照上述目录新建文件夹
+2. 将所有.h/.cpp文件对应放入指定目录
+3. 配置项目附加依赖项：引入GLFW3.lib、添加glad.c源码
+4. 配置GLM头文件包含目录，无需编译（仅模板库）
+5. X64 Release模式编译，直接运行生成exe
+五、核心运行闭环功能
+- 基因自主进化：每25秒自动基因变异，迭代版本号更新，性状参数动态微调
+- 基因-躯体联动：骨骼、神经、运动基因实时控制躯体大小、反应速度、动作幅度
+- AI智能决策：实时感知生态环境波动，自主输出全身关节运动指令
+- 720°全景观察：相机三轴自动旋转，实现无死角全方位观察虚拟生物与生态空间
+- 生态双向闭环：环境动态变化影响AI行为，AI进化适配环境，形成真实生命演化逻辑
+六、四级迭代升级路线（可直接落地开发）
+阶段一：真实骨骼网格仿生躯体（1-3天）
+引入Assimp模型加载库，支持FBX/OBJ人形模型导入，重构骨骼绑定系统，替换当前方块简易躯体，实现真实人体层级骨骼运动。
+阶段二：PBR写实渲染管线升级（3-7天）
+舍弃固定渲染管线，切换OpenGL3.3 Core可编程着色器，实现金属粗糙度PBR渲染、实时光照、环境雾效、昼夜光影联动生态系统，升级鼠标可控720°自由视角。
+阶段三：本地离线AI真实自主进化（7-15天）
+接入本地量化大模型（Qwen2-7B），替换简易数学AI核心，实现AI自我剖析短板、受控联网检索开源算法、自主编写插件代码、本地编译测试、择优迭代升级，实现真正的模型自研进化。
+阶段四：深度基因工程+种群生态闭环（15-30天）
+拓展完整DNA氨基酸序列、显隐性性状、器官参数模拟；接入Bullet物理引擎实现全身动力学碰撞；新增多AI生物种群、季节气象、物质能量循环，构建完整可繁衍的虚拟仿生生态世界。
